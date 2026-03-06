@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BIZ CLASH!</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{background:#0a0a0f}</style>
+</head>
+<body>
+<div id="root"></div>
+<!-- React + Babel loaded from CDN — no build step needed -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+const W = 700, H = 260;
+const ELIXIR_RATE    = 0.14;
+const AI_RATE        = 0.18;
+const AI_ELIXIR_RATE = 0.07;
+const ENEMY_SPD_MULT = 0.55;
+const ENEMY_ATK_MULT = 0.75;
+const UNIT_SPEED     = 55;
+const ATCK_RNG       = 48;
+const TWR_RNG        = 160;
+const TICK_MS        = 80;
+const DT             = TICK_MS / 1000;
+
+const CARDS = [
+  { id:"ceo",    name:"CEO Boss",          cost:4, hp:500,  atk:90,  spd:1.1, rng:ATCK_RNG,       emoji:"👔",  cnt:1, color:"#FFD700" },
+  { id:"intern", name:"Intern Army",       cost:2, hp:120,  atk:25,  spd:1.7, rng:ATCK_RNG,       emoji:"🧑‍💼", cnt:3, color:"#66aaff" },
+  { id:"drone",  name:"Delivery Drone",    cost:2, hp:160,  atk:35,  spd:2.2, rng:ATCK_RNG+10,    emoji:"🚁",  cnt:1, color:"#88ff88" },
+  { id:"robot",  name:"Robot Worker",      cost:3, hp:380,  atk:55,  spd:0.9, rng:ATCK_RNG,       emoji:"🤖",  cnt:1, color:"#cc88ff" },
+  { id:"hacker", name:"Hacker",            cost:3, hp:200,  atk:100, spd:0.9, rng:ATCK_RNG*2.8,   emoji:"💻",  cnt:1, color:"#00ff88" },
+  { id:"truck",  name:"Supply Truck",      cost:4, hp:800,  atk:45,  spd:0.6, rng:ATCK_RNG,       emoji:"🚚",  cnt:1, color:"#ffaa44" },
+  { id:"ninja",  name:"Marketing Ninja",   cost:2, hp:160,  atk:70,  spd:2.0, rng:ATCK_RNG+8,     emoji:"🥷",  cnt:1, color:"#ff66cc" },
+  { id:"invest", name:"Mega Investor",     cost:5, hp:900,  atk:120, spd:0.7, rng:ATCK_RNG,       emoji:"💰",  cnt:1, color:"#FFD700" },
+  { id:"star",   name:"Social Media Star", cost:2, hp:180,  atk:45,  spd:1.5, rng:ATCK_RNG*1.8,   emoji:"⭐",  cnt:1, color:"#ff44aa" },
+  { id:"acct",   name:"Accountant",        cost:2, hp:220,  atk:40,  spd:1.1, rng:ATCK_RNG*2.2,   emoji:"🧮",  cnt:1, color:"#aaaaaa" },
+  { id:"ad",     name:"Ad Blast",          cost:3, hp:0,    atk:200, spd:0,   rng:0,               emoji:"📢",  cnt:1, color:"#ff6600", spell:true },
+  { id:"coff",   name:"Coffee Cannon",     cost:1, hp:0,    atk:120, spd:0,   rng:0,               emoji:"☕",  cnt:1, color:"#aa6633", spell:true },
+];
+
+const BIZS = [
+  { name:"BurgerBoss Corp", emoji:"🍔", bg:"linear-gradient(135deg,#cc3300,#ff8800)", accent:"#ff6600" },
+  { name:"TechZap Inc",     emoji:"⚡", bg:"linear-gradient(135deg,#0033cc,#0099ff)", accent:"#00aaff" },
+  { name:"PizzaPlex Ltd",   emoji:"🍕", bg:"linear-gradient(135deg,#880000,#dd2222)", accent:"#ff4444" },
+  { name:"CoolCat Toys",    emoji:"🐱", bg:"linear-gradient(135deg,#440088,#aa00dd)", accent:"#cc44ff" },
+];
+
+const FACTS = [
+  "💡 Companies compete for customers — just like this game!",
+  "📊 CEOs set the vision. Interns help make it happen!",
+  "💰 Investors give money to help businesses grow big!",
+  "🤖 Robots and automation help businesses work faster!",
+  "📢 Advertising gets customers to notice your business!",
+  "🚚 Supply chains keep businesses running smoothly.",
+  "💻 Tech experts help companies stay ahead of rivals.",
+  "⭐ Social media helps companies reach millions fast!",
+  "🧮 Good accountants help businesses manage money wisely.",
+];
+
+let UID = 0;
+const rnd   = (a,b) => Math.floor(Math.random()*(b-a+1))+a;
+const clmp  = (v,a,b) => v<a?a:v>b?b:v;
+const cById = id => CARDS.find(c=>c.id===id);
+
+function mkTowers(pBiz, eBiz) {
+  return [
+    { id:"pk",  owner:"player", x:80,   y:H/2,    hp:2000, mhp:2000, atk:55, king:true,  cd:0, emoji:pBiz.emoji },
+    { id:"pt1", owner:"player", x:55,   y:H*0.22, hp:1000, mhp:1000, atk:38, king:false, cd:0, emoji:"🏢" },
+    { id:"pt2", owner:"player", x:55,   y:H*0.78, hp:1000, mhp:1000, atk:38, king:false, cd:0, emoji:"🏢" },
+    { id:"ek",  owner:"enemy",  x:W-80, y:H/2,    hp:2000, mhp:2000, atk:55, king:true,  cd:0, emoji:eBiz.emoji },
+    { id:"et1", owner:"enemy",  x:W-55, y:H*0.22, hp:1000, mhp:1000, atk:38, king:false, cd:0, emoji:"🏢" },
+    { id:"et2", owner:"enemy",  x:W-55, y:H*0.78, hp:1000, mhp:1000, atk:38, king:false, cd:0, emoji:"🏢" },
+  ];
+}
+
+function mkUnit(card, owner, x, y, isEnemy) {
+  return {
+    id:UID++, owner, x, y,
+    hp:card.hp, mhp:card.hp,
+    atk: isEnemy ? Math.floor(card.atk * ENEMY_ATK_MULT) : card.atk,
+    spd: isEnemy ? card.spd * UNIT_SPEED * ENEMY_SPD_MULT : card.spd * UNIT_SPEED,
+    rng:card.rng, emoji:card.emoji, color:card.color,
+    cd:0, flash:0,
+  };
+}
+
+function freshState(pBiz, eBiz, pickedIds) {
+  const pool=[...pickedIds,...pickedIds,...pickedIds].sort(()=>Math.random()-.5);
+  const aiCards=CARDS.slice().sort(()=>Math.random()-.5).slice(0,8).map(c=>c.id);
+  UID=0;
+  return {
+    hand:pool.slice(0,4), deck:pool.slice(4), aiDeck:aiCards,
+    units:[], towers:mkTowers(pBiz,eBiz), popups:[],
+    elixir:5, aiElixir:5, timeLeft:180,
+    selIdx:null, logs:["⚔️ Battle! Tap a card then pick a lane!"],
+    dead:false, pBiz, eBiz,
+  };
+}
+
+function BizClash() {
+  const [screen, setScreen] = useState("menu");
+  const [pBiz,   setPBiz]   = useState(null);
+  const [eBiz,   setEBiz]   = useState(null);
+  const [picked, setPicked] = useState([]);
+  const [result, setResult] = useState(null);
+  const cvRef  = useRef(null);
+  const G      = useRef(null);
+  const ticker = useRef(null);
+  const [ui, setUI] = useState({ elixir:5, timeLeft:180, hand:[], selIdx:null, logs:[], phq:100, ehq:100 });
+
+  const flushUI = useCallback(() => {
+    const g=G.current; if(!g) return;
+    const pk=g.towers.find(t=>t.id==="pk");
+    const ek=g.towers.find(t=>t.id==="ek");
+    setUI({
+      elixir:g.elixir, timeLeft:g.timeLeft,
+      hand:[...g.hand], selIdx:g.selIdx, logs:[...g.logs],
+      phq: pk?Math.max(0,Math.round(pk.hp/pk.mhp*100)):0,
+      ehq: ek?Math.max(0,Math.round(ek.hp/ek.mhp*100)):0,
+    });
+  }, []);
+
+  const draw = useCallback(() => {
+    const cv=cvRef.current; if(!cv) return;
+    const ctx=cv.getContext("2d");
+    const g=G.current; if(!g) return;
+
+    const bg=ctx.createLinearGradient(0,0,0,H);
+    bg.addColorStop(0,"#0d1b0d"); bg.addColorStop(.55,"#163016"); bg.addColorStop(1,"#0a200a");
+    ctx.fillStyle=bg; ctx.fillRect(0,0,W,H);
+
+    for(let x=0;x<W;x+=50){ ctx.strokeStyle="rgba(255,255,255,.04)"; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); }
+    ctx.strokeStyle="rgba(255,255,255,.22)"; ctx.lineWidth=2; ctx.setLineDash([8,6]);
+    ctx.beginPath(); ctx.moveTo(W/2,0); ctx.lineTo(W/2,H); ctx.stroke(); ctx.setLineDash([]);
+    ctx.strokeStyle="rgba(255,255,255,.07)"; ctx.lineWidth=1;
+    for(const ly of [H*0.22,H*0.78]){ ctx.beginPath(); ctx.moveTo(0,ly); ctx.lineTo(W,ly); ctx.stroke(); }
+
+    ctx.font="bold 11px 'Trebuchet MS'"; ctx.textBaseline="top";
+    ctx.fillStyle="rgba(80,255,120,.85)"; ctx.textAlign="left";  ctx.fillText("YOU ▶",6,4);
+    ctx.fillStyle="rgba(255,90,70,.85)";  ctx.textAlign="right"; ctx.fillText("◀ ENEMY",W-6,4);
+    ctx.textBaseline="middle";
+
+    for(const t of g.towers) {
+      if(t.hp<=0) continue;
+      const sz=t.king?26:18, bw=t.king?44:30, pct=t.hp/t.mhp;
+      if(t.king){ ctx.strokeStyle=t.owner==="player"?"rgba(80,255,120,.3)":"rgba(255,90,70,.3)"; ctx.lineWidth=5; ctx.beginPath(); ctx.arc(t.x,t.y,sz+7,0,Math.PI*2); ctx.stroke(); }
+      ctx.fillStyle="rgba(0,0,0,.5)"; ctx.beginPath(); ctx.ellipse(t.x,t.y+sz/2+4,sz*.6,sz*.18,0,0,Math.PI*2); ctx.fill();
+      ctx.font=sz+"px serif"; ctx.textAlign="center"; ctx.fillText(t.emoji,t.x,t.y);
+      const hpc=pct>.5?"#44ee66":pct>.25?"#ffcc00":"#ff3333";
+      ctx.fillStyle="rgba(0,0,0,.7)"; ctx.fillRect(t.x-bw/2,t.y+sz/2+7,bw,6);
+      ctx.fillStyle=hpc; ctx.fillRect(t.x-bw/2,t.y+sz/2+7,bw*pct,6);
+      ctx.strokeStyle="#333"; ctx.lineWidth=1; ctx.strokeRect(t.x-bw/2,t.y+sz/2+7,bw,6);
+    }
+
+    for(const u of g.units) {
+      const pct=u.hp/u.mhp;
+      ctx.fillStyle="rgba(0,0,0,.4)"; ctx.beginPath(); ctx.ellipse(u.x,u.y+14,11,4,0,0,Math.PI*2); ctx.fill();
+      if(u.flash>0){ ctx.globalAlpha=u.flash*.6; ctx.fillStyle="#fff"; ctx.beginPath(); ctx.arc(u.x,u.y,14,0,Math.PI*2); ctx.fill(); ctx.globalAlpha=1; }
+      ctx.font="20px serif"; ctx.textAlign="center"; ctx.fillText(u.emoji,u.x,u.y);
+      ctx.fillStyle=u.owner==="player"?"#44aaff":"#ff5522"; ctx.beginPath(); ctx.arc(u.x,u.y-15,3,0,Math.PI*2); ctx.fill();
+      const hpc=pct>.5?"#44ee66":pct>.25?"#ffcc00":"#ff3333";
+      ctx.fillStyle="rgba(0,0,0,.7)"; ctx.fillRect(u.x-13,u.y+15,26,4);
+      ctx.fillStyle=hpc; ctx.fillRect(u.x-13,u.y+15,26*pct,4);
+    }
+
+    for(const p of g.popups) {
+      const alpha=1-p.age/20; if(alpha<=0) continue;
+      ctx.globalAlpha=alpha;
+      ctx.font=`bold ${p.big?17:12}px 'Trebuchet MS'`;
+      ctx.fillStyle=p.color||"#fff"; ctx.textAlign="center"; ctx.textBaseline="middle";
+      ctx.fillText(p.txt,p.x,p.y-p.age*1.6);
+      ctx.globalAlpha=1; ctx.textBaseline="middle";
+    }
+  }, []);
+
+  const tick = useCallback(() => {
+    const g=G.current; if(!g||g.dead) return;
+    g.elixir   = Math.min(10, g.elixir   + ELIXIR_RATE);
+    g.aiElixir = Math.min(10, g.aiElixir + AI_ELIXIR_RATE);
+    g.timeLeft -= DT;
+    if(g.timeLeft<=0){ finishGame("time"); return; }
+
+    if(Math.random()<AI_RATE) {
+      const ok=CARDS.filter(c=>g.aiDeck.includes(c.id)&&c.cost<=g.aiElixir&&!c.spell).sort((a,b)=>a.cost-b.cost);
+      if(ok.length) {
+        const card=ok[rnd(0,Math.min(1,ok.length-1))];
+        g.aiElixir-=card.cost;
+        const y=Math.random()>.5?H*0.22:H*0.78;
+        const n=card.cnt||1;
+        for(let i=0;i<n;i++){ const off=n===1?0:(i-(n-1)/2)*20; g.units.push(mkUnit(card,"enemy",W-140,y+off,true)); }
+        g.logs.unshift("🤖 "+card.emoji+" "+card.name+"!"); if(g.logs.length>5)g.logs.pop();
+      }
+    }
+
+    for(const p of g.popups) p.age++;
+    g.popups=g.popups.filter(p=>p.age<20);
+
+    for(const u of g.units) {
+      u.flash=Math.max(0,u.flash-0.15);
+      if(u.cd>0){u.cd-=DT;continue;}
+      let best=null,bd=99999;
+      for(const e of g.units){ if(e.owner===u.owner)continue; const d=Math.abs(e.x-u.x)+Math.abs(e.y-u.y)*.3; if(d<bd){bd=d;best=e;} }
+      for(const t of g.towers){ if(t.owner===u.owner||t.hp<=0)continue; const d=Math.abs(t.x-u.x)+Math.abs(t.y-u.y)*.5; if(d<bd){bd=d;best=t;} }
+      if(best&&bd<=u.rng){
+        u.cd=0.9; u.flash=1;
+        const dmg=u.atk+rnd(-Math.floor(u.atk*.12),Math.floor(u.atk*.12));
+        best.hp=Math.max(0,best.hp-dmg);
+        g.popups.push({id:UID++,x:best.x+rnd(-12,12),y:best.y-10,txt:"-"+dmg,color:u.owner==="player"?"#ffee44":"#ff7744",big:dmg>80,age:0});
+      } else {
+        const dir=u.owner==="player"?1:-1;
+        u.x=clmp(u.x+dir*u.spd*DT,40,W-40);
+        if(best){const dy=best.y-u.y; u.y+=Math.sign(dy)*Math.min(Math.abs(dy),u.spd*DT*.4);}
+        u.y=clmp(u.y,15,H-15);
+      }
+    }
+
+    for(const tw of g.towers) {
+      if(tw.hp<=0)continue; if(tw.cd>0){tw.cd-=DT;continue;}
+      let near=null,nd=99999;
+      for(const u of g.units){ if(u.owner===tw.owner)continue; const d=Math.abs(u.x-tw.x); if(d<nd){nd=d;near=u;} }
+      if(near&&nd<TWR_RNG){
+        tw.cd=0.9; const dmg=tw.atk+rnd(-8,8); near.hp=Math.max(0,near.hp-dmg);
+        g.popups.push({id:UID++,x:near.x+rnd(-8,8),y:near.y-8,txt:"-"+dmg,color:"#ff8844",big:false,age:0});
+      }
+    }
+
+    g.units=g.units.filter(u=>u.hp>0);
+    const ek=g.towers.find(t=>t.id==="ek"), pk=g.towers.find(t=>t.id==="pk");
+    if(ek&&ek.hp<=0){finishGame("player");return;}
+    if(pk&&pk.hp<=0){finishGame("enemy");return;}
+    draw(); flushUI();
+  }, [draw, flushUI]);
+
+  function finishGame(reason) {
+    clearInterval(ticker.current);
+    const g=G.current; if(!g)return;
+    g.dead=true; draw();
+    setResult(reason); setScreen("result");
+  }
+
+  function startGame(picks) {
+    clearInterval(ticker.current);
+    G.current=freshState(pBiz,eBiz,picks);
+    flushUI(); setResult(null); setScreen("game");
+    setTimeout(()=>draw(),30);
+    ticker.current=setInterval(tick,TICK_MS);
+  }
+
+  useEffect(()=>()=>clearInterval(ticker.current),[]);
+
+  function selectCard(idx) {
+    const g=G.current; if(!g||g.dead)return;
+    const card=cById(g.hand[idx]); if(!card)return;
+    if(g.elixir<card.cost){
+      g.logs.unshift("❌ Need 💧"+card.cost+" — have "+g.elixir.toFixed(1));
+      if(g.logs.length>5)g.logs.pop();
+      flushUI(); return;
+    }
+    g.selIdx=(g.selIdx===idx)?null:idx;
+    if(g.selIdx!==null){ g.logs.unshift("✅ "+card.emoji+" "+card.name+" — pick a lane!"); if(g.logs.length>5)g.logs.pop(); }
+    flushUI();
+  }
+
+  function deployLane(lane) {
+    const g=G.current; if(!g||g.dead)return;
+    if(g.selIdx===null){ g.logs.unshift("👈 Tap a card first!"); if(g.logs.length>5)g.logs.pop(); flushUI(); return; }
+    const idx=g.selIdx, card=cById(g.hand[idx]);
+    if(!card){g.selIdx=null;flushUI();return;}
+    if(g.elixir<card.cost){ g.logs.unshift("❌ Need 💧"+card.cost); if(g.logs.length>5)g.logs.pop(); g.selIdx=null; flushUI(); return; }
+    g.elixir-=card.cost;
+    const y=lane==="top"?H*0.22:H*0.78;
+    if(card.spell){
+      const r=130,tx=W*0.65;
+      for(const u of g.units) if(u.owner!=="player"&&Math.abs(u.x-tx)<r) u.hp-=card.atk;
+      g.units=g.units.filter(u=>u.hp>0);
+      for(const t of g.towers) if(t.owner!=="player"&&Math.abs(t.x-tx)<r+30) t.hp=Math.max(0,t.hp-Math.floor(card.atk*.55));
+      g.popups.push({id:UID++,x:tx,y:H/2,txt:"💥 "+card.atk,color:"#ffaa00",big:true,age:0});
+      g.logs.unshift("💥 "+card.emoji+" "+card.name+" blasts!"); if(g.logs.length>5)g.logs.pop();
+    } else {
+      const n=card.cnt||1;
+      for(let i=0;i<n;i++){ const off=n===1?0:(i-(n-1)/2)*20; g.units.push(mkUnit(card,"player",140,y+off,false)); }
+      g.logs.unshift("🚀 "+card.emoji+" → "+(lane==="top"?"TOP":"BOT")+"! 💧-"+card.cost); if(g.logs.length>5)g.logs.pop();
+    }
+    const used=g.hand[idx];
+    if(g.deck.length>0){g.hand[idx]=g.deck.shift();g.deck.push(used);}
+    g.selIdx=null; draw(); flushUI();
+  }
+
+  const selCard=ui.selIdx!=null?cById(ui.hand[ui.selIdx]):null;
+
+  if(screen==="menu") return (
+    <div style={{minHeight:"100vh",background:"linear-gradient(160deg,#050510,#160530,#050a05)",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:20,textAlign:"center",fontFamily:"'Trebuchet MS',sans-serif",color:"#fff"}}>
+      <style>{`@keyframes shimmer{from{background-position:0%}to{background-position:200%}} @keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}`}</style>
+      <div style={{fontSize:64,animation:"bob 2s ease-in-out infinite",filter:"drop-shadow(0 0 24px gold)"}}>🏢</div>
+      <h1 style={{fontSize:52,fontWeight:900,background:"linear-gradient(90deg,#FFD700,#ff8800,#ff44aa,#00aaff,#FFD700)",backgroundSize:"300%",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",animation:"shimmer 3s linear infinite",margin:"8px 0 4px"}}>BIZ CLASH!</h1>
+      <p style={{color:"#aaa",marginBottom:20,fontSize:15}}>Battle of the Business Giants! 💼⚔️</p>
+      <p style={{color:"#FFD700",fontWeight:"bold",fontSize:16,marginBottom:14}}>Choose your company:</p>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,width:360,marginBottom:24}}>
+        {BIZS.map((b,i)=>(
+          <button key={i} onClick={()=>{setPBiz(b);const o=BIZS.filter((_,j)=>j!==i);setEBiz(o[rnd(0,o.length-1)]);setPicked([]);setScreen("pick");}}
+            style={{padding:"20px 10px",borderRadius:16,border:`2px solid ${b.accent}66`,background:b.bg,color:"#fff",fontSize:14,fontWeight:"bold",cursor:"pointer",boxShadow:`0 6px 20px ${b.accent}44`,fontFamily:"'Trebuchet MS',sans-serif"}}>
+            <div style={{fontSize:38,marginBottom:6}}>{b.emoji}</div>{b.name}
+          </button>
+        ))}
+      </div>
+      <div style={{background:"rgba(255,255,255,.07)",borderRadius:14,padding:"14px 20px",maxWidth:360,fontSize:13,color:"#ccc",lineHeight:2,textAlign:"left",border:"1px solid rgba(255,255,255,.1)"}}>
+        <b style={{color:"#FFD700"}}>How to play:</b><br/>
+        1️⃣ Pick 8 cards for your deck<br/>
+        2️⃣ Tap a card to select it (glows gold 🟡)<br/>
+        3️⃣ Tap ⬆️ TOP or ⬇️ BOTTOM lane<br/>
+        4️⃣ Your units march and fight!<br/>
+        5️⃣ Destroy the enemy 👑 HQ to WIN!<br/>
+        <span style={{color:"#aa44ff"}}>💧 Elixir fills up — keep deploying!</span>
+      </div>
+    </div>
+  );
+
+  if(screen==="pick") {
+    const toggle=id=>setPicked(prev=>prev.includes(id)?prev.filter(x=>x!==id):prev.length<8?[...prev,id]:prev);
+    return (
+      <div style={{minHeight:"100vh",background:"#0d0d1f",padding:16,fontFamily:"'Trebuchet MS',sans-serif",color:"#fff",display:"flex",flexDirection:"column",alignItems:"center"}}>
+        <h2 style={{color:"#FFD700",marginBottom:4,textAlign:"center"}}>{pBiz?.emoji} {pBiz?.name} — Build Your Deck</h2>
+        <p style={{textAlign:"center",color:"#aaa",fontSize:12,marginBottom:10}}>Pick exactly 8 cards.</p>
+        <div style={{background:"rgba(255,215,0,.12)",borderRadius:10,padding:"8px 20px",border:`2px solid ${picked.length===8?"#FFD700":"rgba(255,215,0,.25)"}`,fontWeight:"bold",fontSize:17,marginBottom:14}}>
+          {picked.length}/8{picked.length===8?" ✅ Ready!":""}
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(100px,1fr))",gap:8,maxWidth:680,width:"100%"}}>
+          {CARDS.map(c=>{
+            const on=picked.includes(c.id);
+            return (
+              <div key={c.id} onClick={()=>toggle(c.id)} style={{background:on?`${c.color}22`:"#1a1a2e",border:`2px solid ${on?c.color:"#444"}`,borderRadius:10,padding:"9px 5px",textAlign:"center",cursor:"pointer",transform:on?"scale(1.05)":"",transition:"all .12s",boxShadow:on?`0 0 12px ${c.color}66`:""}}>
+                <div style={{fontSize:24}}>{c.emoji}</div>
+                <div style={{fontSize:10,fontWeight:"bold",margin:"3px 0",lineHeight:1.3}}>{c.name}</div>
+                <div style={{background:"#5500cc",borderRadius:6,padding:"1px 6px",fontSize:11,display:"inline-block"}}>💧{c.cost}</div>
+                {c.spell&&<div style={{fontSize:9,color:"#ff9900",marginTop:2,fontWeight:"bold"}}>✨ SPELL</div>}
+              </div>
+            );
+          })}
+        </div>
+        {picked.length===8&&(
+          <button onClick={()=>startGame(picked)} style={{marginTop:20,padding:"15px 50px",background:"linear-gradient(135deg,#FFD700,#ff8800)",color:"#000",fontSize:20,fontWeight:"bold",border:"none",borderRadius:50,cursor:"pointer",boxShadow:"0 8px 30px #FFD70055",fontFamily:"'Trebuchet MS',sans-serif"}}>
+            ⚔️ BATTLE!
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  if(screen==="result") {
+    const g=G.current||{towers:[],pBiz:pBiz||BIZS[0],eBiz:eBiz||BIZS[1]};
+    const pk=g.towers.find(t=>t.id==="pk")||{hp:0,mhp:2000};
+    const ek=g.towers.find(t=>t.id==="ek")||{hp:0,mhp:2000};
+    const pLeft=g.towers.filter(t=>t.owner==="player"&&t.hp>0).length;
+    const eLeft=g.towers.filter(t=>t.owner==="enemy"&&t.hp>0).length;
+    let win;
+    if(result==="player")win=true;
+    else if(result==="enemy")win=false;
+    else win=pLeft!==eLeft?pLeft>eLeft:(pk.hp||0)>(ek.hp||0);
+    return (
+      <div style={{minHeight:"100vh",background:win?"linear-gradient(160deg,#050f05,#0d2a0d)":"linear-gradient(160deg,#0f0505,#2a0d0d)",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:20,fontFamily:"'Trebuchet MS',sans-serif",color:"#fff",textAlign:"center"}}>
+        <style>{`@keyframes pop{0%{transform:scale(0)}60%{transform:scale(1.2)}100%{transform:scale(1)}}`}</style>
+        <div style={{fontSize:80,animation:"pop .6s ease-out",filter:`drop-shadow(0 0 30px ${win?"gold":"red"})`}}>{win?"🏆":"💀"}</div>
+        <h1 style={{fontSize:48,color:win?"#FFD700":"#ff4444",margin:"8px 0"}}>{win?"VICTORY!":"DEFEAT!"}</h1>
+        <p style={{color:"#ccc",marginBottom:20,fontSize:15}}>{win?`${g.pBiz.emoji} ${g.pBiz.name} crushed it!`:`${g.eBiz.emoji} ${g.eBiz.name} dominated!`}</p>
+        <div style={{display:"flex",gap:16,marginBottom:20,justifyContent:"center",flexWrap:"wrap"}}>
+          {[{biz:g.pBiz,left:pLeft,hp:pk.hp,mhp:pk.mhp,col:"#44ee66"},{biz:g.eBiz,left:eLeft,hp:ek.hp,mhp:ek.mhp,col:"#ee4444"}].map((r,i)=>(
+            <div key={i} style={{background:"rgba(255,255,255,.08)",borderRadius:14,padding:"16px 22px",border:`2px solid ${r.col}44`,minWidth:140}}>
+              <div style={{fontSize:32}}>{r.biz.emoji}</div>
+              <b style={{fontSize:15}}>{r.biz.name}</b>
+              <div style={{color:r.col,fontSize:13,marginTop:6}}>🏢 {r.left} buildings left</div>
+              <div style={{marginTop:6,height:8,background:"#333",borderRadius:4,overflow:"hidden"}}>
+                <div style={{height:"100%",borderRadius:4,background:r.col,width:(r.mhp>0?(r.hp/r.mhp*100):0)+"%"}}/>
+              </div>
+              <div style={{color:"#FFD700",fontSize:12,marginTop:3}}>HQ {r.mhp>0?Math.floor(r.hp/r.mhp*100):0}%</div>
+            </div>
+          ))}
+        </div>
+        <div style={{background:"rgba(255,200,0,.1)",border:"2px solid rgba(255,200,0,.3)",borderRadius:14,padding:"14px 20px",maxWidth:400,marginBottom:22,fontSize:13,lineHeight:1.9}}>
+          <b style={{color:"#FFD700"}}>📚 Business Fact!</b><br/>{FACTS[rnd(0,FACTS.length-1)]}
+        </div>
+        <div style={{display:"flex",gap:10,flexWrap:"wrap",justifyContent:"center"}}>
+          <button onClick={()=>startGame(picked)} style={{padding:"14px 34px",fontSize:17,fontWeight:"bold",background:"linear-gradient(135deg,#FFD700,#ff8800)",color:"#000",border:"none",borderRadius:50,cursor:"pointer",fontFamily:"'Trebuchet MS',sans-serif"}}>🔄 Rematch!</button>
+          <button onClick={()=>{setScreen("menu");setPicked([]);}} style={{padding:"14px 34px",fontSize:17,fontWeight:"bold",background:"rgba(255,255,255,.12)",color:"#fff",border:"2px solid rgba(255,255,255,.3)",borderRadius:50,cursor:"pointer",fontFamily:"'Trebuchet MS',sans-serif"}}>🏠 Menu</button>
+        </div>
+      </div>
+    );
+  }
+
+  const m=Math.floor(ui.timeLeft/60), sec=Math.floor(ui.timeLeft%60);
+  const urgent=ui.timeLeft<30;
+  return (
+    <div style={{background:"#0a0a0f",minHeight:"100vh",padding:"6px 6px 12px",maxWidth:760,margin:"0 auto",fontFamily:"'Trebuchet MS',sans-serif",color:"#fff"}}>
+      <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}`}</style>
+      <div style={{display:"flex",alignItems:"stretch",gap:6,marginBottom:6}}>
+        <div style={{flex:1,background:"rgba(255,255,255,.07)",borderRadius:10,padding:"5px 10px",fontSize:12,borderLeft:`3px solid ${pBiz?.accent||"#44ee66"}`}}>
+          <span style={{fontSize:16}}>{pBiz?.emoji}</span> <b>{pBiz?.name}</b>
+          <div style={{height:5,background:"#333",borderRadius:3,marginTop:4,overflow:"hidden"}}><div style={{height:"100%",borderRadius:3,background:"#44ee66",width:ui.phq+"%",transition:"width .3s"}}/></div>
+          <div style={{color:"#FFD700",fontSize:10,marginTop:2}}>{ui.phq}% HQ</div>
+        </div>
+        <div style={{background:urgent?"rgba(180,0,0,.5)":"rgba(255,255,255,.1)",borderRadius:30,padding:"6px 14px",fontSize:22,fontWeight:"bold",display:"flex",alignItems:"center",border:urgent?"2px solid #ff4444":"2px solid rgba(255,255,255,.2)",animation:urgent?"pulse .5s infinite":"none",whiteSpace:"nowrap"}}>
+          ⏱ {m}:{sec<10?"0"+sec:sec}
+        </div>
+        <div style={{flex:1,background:"rgba(255,255,255,.07)",borderRadius:10,padding:"5px 10px",fontSize:12,textAlign:"right",borderRight:`3px solid ${eBiz?.accent||"#ee4444"}`}}>
+          <span style={{fontSize:16}}>{eBiz?.emoji}</span> <b>{eBiz?.name}</b>
+          <div style={{height:5,background:"#333",borderRadius:3,marginTop:4,overflow:"hidden"}}><div style={{height:"100%",borderRadius:3,background:"#ee4444",width:ui.ehq+"%",transition:"width .3s",marginLeft:"auto"}}/></div>
+          <div style={{color:"#ff6666",fontSize:10,marginTop:2}}>{ui.ehq}% HQ</div>
+        </div>
+      </div>
+      <canvas ref={cvRef} width={W} height={H} style={{width:"100%",borderRadius:14,border:`3px solid ${selCard?"#FFD700":"rgba(255,255,255,.12)"}`,display:"block",marginBottom:6}}/>
+      <div style={{marginBottom:7}}>
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+          <span style={{fontSize:13}}>💧 Elixir</span>
+          <b style={{color:"#cc44ff",fontSize:16}}>{Math.floor(ui.elixir*10)/10} / 10</b>
+        </div>
+        <div style={{height:15,background:"rgba(255,255,255,.1)",borderRadius:8,overflow:"hidden",position:"relative"}}>
+          <div style={{height:"100%",background:"linear-gradient(90deg,#6600ff,#cc44ff)",borderRadius:8,width:(ui.elixir/10*100)+"%",transition:"width .12s"}}/>
+          {[1,2,3,4,5,6,7,8,9].map(n=>(<div key={n} style={{position:"absolute",left:(n/10*100)+"%",top:0,width:1,height:"100%",background:"rgba(0,0,0,.4)"}}/>))}
+        </div>
+      </div>
+      <div style={{fontSize:12,marginBottom:5,minHeight:18,color:selCard?"#FFD700":"#888",fontWeight:selCard?"bold":"normal"}}>
+        {selCard?`✅ ${selCard.emoji} ${selCard.name} ready (💧${selCard.cost}) — pick a lane!`:"👇 Tap a card to select it, then choose a lane:"}
+      </div>
+      <div style={{display:"flex",gap:5,marginBottom:7}}>
+        {ui.hand.map((cid,idx)=>{
+          const card=cById(cid); if(!card) return null;
+          const canAff=ui.elixir>=card.cost, isSel=ui.selIdx===idx;
+          return (
+            <div key={idx} onClick={()=>selectCard(idx)} style={{flex:1,borderRadius:11,padding:"7px 3px",textAlign:"center",cursor:canAff?"pointer":"not-allowed",background:isSel?`linear-gradient(135deg,${card.color}55,${card.color}22)`:"rgba(255,255,255,.07)",border:`2px solid ${isSel?card.color:canAff?"rgba(255,255,255,.2)":"rgba(255,255,255,.06)"}`,opacity:canAff?1:.32,transform:isSel?"translateY(-10px) scale(1.13)":"",boxShadow:isSel?`0 10px 24px ${card.color}77`:"",transition:"all .15s",minWidth:0}}>
+              <div style={{fontSize:22}}>{card.emoji}</div>
+              <div style={{fontSize:9,fontWeight:"bold",margin:"2px 0",lineHeight:1.3,color:"#fff"}}>{card.name}</div>
+              <div style={{background:"#5500cc",borderRadius:8,padding:"2px 6px",fontSize:12,color:"#fff",display:"inline-block"}}>💧{card.cost}</div>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{display:"flex",gap:8,marginBottom:6}}>
+        <button onClick={()=>deployLane("top")} style={{flex:1,padding:"14px 8px",fontSize:16,fontWeight:"bold",borderRadius:12,cursor:"pointer",color:"#fff",fontFamily:"'Trebuchet MS',sans-serif",border:`2px solid ${selCard?"#00ee66":"rgba(0,200,80,.25)"}`,background:selCard?"rgba(0,140,60,.65)":"rgba(0,140,60,.12)",boxShadow:selCard?"0 0 18px #00ee6655":"none",transform:selCard?"scale(1.02)":"",transition:"all .15s",opacity:selCard?1:.5}}>⬆️ TOP LANE</button>
+        <button onClick={()=>deployLane("bot")} style={{flex:1,padding:"14px 8px",fontSize:16,fontWeight:"bold",borderRadius:12,cursor:"pointer",color:"#fff",fontFamily:"'Trebuchet MS',sans-serif",border:`2px solid ${selCard?"#2288ff":"rgba(0,100,255,.25)"}`,background:selCard?"rgba(0,80,200,.65)":"rgba(0,80,200,.12)",boxShadow:selCard?"0 0 18px #2288ff55":"none",transform:selCard?"scale(1.02)":"",transition:"all .15s",opacity:selCard?1:.5}}>⬇️ BOTTOM LANE</button>
+      </div>
+      <div style={{minHeight:36}}>
+        {ui.logs.slice(0,3).map((l,i)=>(<div key={i} style={{fontSize:12,color:i===0?"#ddd":"#555",lineHeight:1.7}}>{l}</div>))}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<BizClash />);
+</script>
+</body>
+</html>
